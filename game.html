@@ -33,7 +33,12 @@ footer{align-self:stretch;margin:auto -12px -28px;padding:16px 12px calc(16px + 
 footer::before{content:"";position:absolute;left:0;right:0;top:-2px;height:2px;background:linear-gradient(90deg,transparent,#ffe600,#ff3b4e,#00ffde,transparent);filter:blur(.4px)}
 footer a{color:#ffe600;font-weight:600;text-decoration:none;border-bottom:1px dotted #ffe60088;transition:color .2s}
 footer a:hover{color:#fff;border-color:#fff}
-@media (pointer:coarse),(max-width:720px){.dpad{display:grid}}
+.mode{display:none;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px}
+.mode span{font-size:8px;color:#8e97ff;margin-right:4px}
+.mode button{font-size:9px;padding:10px 12px;border-radius:14px;background:#10154f;color:#b9c0ff;box-shadow:0 0 0 2px #2a3cff}
+.mode button.on{background:#ffe600;color:#241a00;box-shadow:0 0 14px #ffd00088}
+@media (pointer:coarse),(max-width:720px){.dpad{display:grid}.mode{display:flex}}
+body[data-ctl=swipe] .dpad{display:none}
 </style>
 </head>
 <body>
@@ -51,6 +56,10 @@ footer a:hover{color:#fff;border-color:#fff}
     <button id="play">▶ START</button>
     <button id="restart" aria-label="Restart">↻</button>
     <button id="snd" aria-label="Sound on/off">🔊</button>
+  </div>
+  <div class="mode">
+    <span>CONTROLS</span>
+    <button data-m="swipe">Swipe</button><button data-m="pad">Buttons</button><button data-m="both">Both</button>
   </div>
   <div class="dpad">
     <button data-d="U" aria-label="Up">▲</button><button data-d="L" aria-label="Left">◀</button>
@@ -73,7 +82,12 @@ const ROWS=[
 "#.................#","###################"];
 const DIRS=[[1,0],[-1,0],[0,1],[0,-1]],[R,L,D,U]=DIRS;
 const KMAP={ArrowRight:R,d:R,D:R,ArrowLeft:L,a:L,A:L,ArrowDown:D,s:D,S:D,ArrowUp:U,w:U,W:U};
-const GCOL=['#ff3030','#ffb8de','#00ffde','#ffb847'],GX=[60,80,100,120],GR=[.2,.3,.45,.35];
+const GCOL=['#ff3030','#ffb847','#ffb8de','#00ffde'],GX=[60,120,80,100],GF=[1,.7,.85,.6];
+/* Difficulty per level: [ghosts, chase chance, ghost speed, scared seconds, release delay seconds]
+   Level 1 is very easy, level 10 is the hardest. After level 10 the game stays at level-10 difficulty. */
+const LV=[[2,.10,.60,10,4],[2,.20,.70,9,3],[3,.30,.75,8,3],[3,.40,.80,7,2.5],[4,.50,.85,6,2],
+          [4,.60,.90,5,2],[4,.70,.95,4,1.5],[4,.80,1,3,1],[4,.90,1,2.5,1],[4,1,1,2,.5]];
+const cfg=()=>LV[Math.min(level,LV.length)-1];
 const $=id=>document.getElementById(id),cv=$('c'),ctx=cv.getContext('2d');
 let map,dots,pac,ghosts,state='idle',paused=false,tick=0,timer=0,score=0,hi=0,lives=3,level=1,k=1,combo=0,powerUntil=0,nextLife=10000,muted=false;
 try{hi=+localStorage.getItem('pm_hi')||0;muted=localStorage.getItem('pm_mute')==='1'}catch(e){}
@@ -104,8 +118,9 @@ const SFX={
 /* ---------- game setup ---------- */
 function buildMap(){map=ROWS.map(r=>[...r]);dots=map.flat().filter(c=>c==='.'||c==='o').length}
 function resetPos(){
-  pac={x:90,y:120,d:L,w:L,mv:false};
-  ghosts=GCOL.map((c,i)=>({c,i,x:GX[i],y:80,sx:GX[i],d:i%2?R:L,fr:false,dead:0}));
+  const c=cfg();
+  pac={x:90,y:200,d:L,w:L,mv:false};
+  ghosts=GCOL.slice(0,c[0]).map((col,i)=>({c:col,i,x:GX[i],y:80,sx:GX[i],d:i%2?R:L,fr:false,dead:0,acc:0,wait:Math.round(c[4]*30*(i+1))}));
   powerUntil=0;combo=0;
 }
 function start(){
@@ -134,7 +149,7 @@ function movePac(){
       map[y][x]=' ';dots--;
       if(c==='.'){score+=10;SFX.chomp()}
       else{
-        score+=50;combo=0;powerUntil=tick+Math.max(3,8-level)*30;SFX.pill();
+        score+=50;combo=0;powerUntil=tick+cfg()[3]*30;SFX.pill();
         ghosts.forEach(q=>{if(!q.dead){q.fr=true;q.d=[-q.d[0],-q.d[1]]}});
       }
     }
@@ -142,14 +157,17 @@ function movePac(){
 }
 function moveGhost(g){
   if(g.dead){g.dead--;return}
-  if(g.fr&&tick%2)return; /* frightened ghosts are slower */
+  if(g.wait>0){g.wait--;return}
+  g.acc+=cfg()[2]*(g.fr?.5:1); /* slower when scared */
+  if(g.acc<1)return;
+  g.acc-=1;
   if(grid(g)){
     const gx=g.x/10,gy=g.y/10;
     let o=DIRS.filter(d=>passable(gx+d[0],gy+d[1])&&!(d[0]===-g.d[0]&&d[1]===-g.d[1]));
     if(!o.length)o=DIRS.filter(d=>passable(gx+d[0],gy+d[1]));
-    const px=pac.x/10+(g.i===1?pac.d[0]*4:0),py=pac.y/10+(g.i===1?pac.d[1]*4:0);
+    const px=pac.x/10+(g.i===2?pac.d[0]*4:0),py=pac.y/10+(g.i===2?pac.d[1]*4:0);
     const dist=d=>(gx+d[0]-px)**2+(gy+d[1]-py)**2;
-    g.d=(g.fr||Math.random()<Math.max(.05,GR[g.i]-.02*level))
+    g.d=(g.fr||Math.random()>=cfg()[1]*GF[g.i])
       ?o[Math.random()*o.length|0]:o.reduce((a,b)=>dist(b)<dist(a)?b:a);
   }
   g.x+=g.d[0]*2;g.y+=g.d[1]*2;wrap(g);
@@ -245,8 +263,8 @@ function render(){
   if(paused)banner('PAUSED','PRESS P, SPACE OR TAP TO RESUME');
   else if(state==='idle')banner('PAC-MAN','PRESS START - ARROWS / WASD / SWIPE');
   else if(state==='over')banner('GAME OVER','SCORE '+score+' - PRESS START TO RETRY','#ff3b4e');
-  else if(state==='ready'){ctx.fillStyle='#ffe600';ctx.textAlign='center';ctx.font='12px '+F;ctx.fillText('READY!',CW/2,12.75*S)}
-  $('sc').textContent=score;$('hi').textContent=hi;$('lv').textContent=level;$('li').textContent='♥'.repeat(Math.max(lives,0))||'-';
+  else if(state==='ready'){ctx.fillStyle='#ffe600';ctx.textAlign='center';ctx.font='12px '+F;ctx.fillText('LEVEL '+level+' READY!',CW/2,12.75*S)}
+  $('sc').textContent=score;$('hi').textContent=hi;$('lv').textContent=level>10?'MAX':level+'/10';$('li').textContent='♥'.repeat(Math.max(lives,0))||'-';
 }
 function fit(){
   const w=cv.getBoundingClientRect().width,dpr=Math.min(window.devicePixelRatio||1,2);
@@ -283,11 +301,21 @@ addEventListener('keyup',e=>{if(e.key===' ')e.preventDefault()});
 $('play').onclick=e=>{togglePause();e.currentTarget.blur()};
 $('restart').onclick=e=>{start();e.currentTarget.blur()};
 $('snd').onclick=e=>{toggleMute();e.currentTarget.blur()};
+let ctl='both';
+try{ctl=localStorage.getItem('pm_ctl')||'both'}catch(e){}
+function setCtl(m){
+  if(!['swipe','pad','both'].includes(m))m='both';
+  ctl=m;document.body.dataset.ctl=m;
+  try{localStorage.setItem('pm_ctl',m)}catch(e){}
+  document.querySelectorAll('.mode button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
+}
+document.querySelectorAll('.mode button').forEach(b=>b.onclick=()=>setCtl(b.dataset.m));
+setCtl(ctl);
 document.querySelectorAll('.dpad button').forEach(b=>b.addEventListener('pointerdown',e=>{
   e.preventDefault();setDir({R,L,D,U}[b.dataset.d]);
 }));
 let sx=null,sy=0,moved=false;
-cv.addEventListener('pointerdown',e=>{sx=e.clientX;sy=e.clientY;moved=false});
+cv.addEventListener('pointerdown',e=>{moved=false;if(ctl==='pad')return;sx=e.clientX;sy=e.clientY});
 cv.addEventListener('pointermove',e=>{
   if(sx===null)return;
   const dx=e.clientX-sx,dy=e.clientY-sy;
