@@ -1846,7 +1846,7 @@
       const statusEl = document.getElementById("status");
       const sendBtn = document.getElementById("send");
       const TO = "pandeyashish2056@gmail.com";
-      // Replace this with your deployed Cloudflare Worker URL.
+      // Same-site Cloudflare Pages Function: functions/api/contact.js
       const CONTACT_API_URL = "/api/contact";
       let turnstileToken = "";
 
@@ -1863,6 +1863,7 @@
       let lastSubmitAt = 0;
       const MIN_FILL_TIME_MS = 2500;
       const SUBMIT_COOLDOWN_MS = 15000;
+      const REQUEST_TIMEOUT_MS = 20000; // give up after 20 seconds instead of freezing
 
       const open = () => {
         modal.classList.add("open");
@@ -1948,6 +1949,13 @@
 
         sendBtn.disabled = true;
         sendBtn.textContent = "Sending...";
+        // Tell the visitor it is working so they do not click again.
+        showStatus("", "Sending your message, please wait (it can take a few seconds)...");
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+        let failureText = "Could not send right now.";
+        let serverRef = "";
 
         try {
           const response = await fetch(CONTACT_API_URL, {
@@ -1960,9 +1968,16 @@
               website: honey,
               turnstileToken,
             }),
+            signal: controller.signal,
           });
 
-          const result = await response.json();
+          // The server answers with JSON; if it ever does not, fall back safely.
+          const result = await response.json().catch(() => ({}));
+          if (typeof result.message === "string" && result.message) {
+            failureText = result.message;
+          }
+          if (typeof result.ref === "string") serverRef = result.ref;
+
           if (response.ok && result.success === true) {
             lastSubmitAt = Date.now();
             showStatus("ok", "Thank you! Your message has been sent.");
@@ -1971,12 +1986,19 @@
             turnstileToken = "";
             if (window.turnstile) window.turnstile.reset();
           } else {
-            throw new Error(result.error || "The message could not be sent.");
+            throw new Error(failureText);
           }
         } catch (error) {
+          if (error && error.name === "AbortError") {
+            failureText = "The request took too long.";
+          }
           showStatus(
             "err",
-            "Could not send right now. Please email " + TO + " directly.",
+            failureText +
+              " Please email " +
+              TO +
+              " directly." +
+              (serverRef ? " (Ref: " + serverRef + ")" : ""),
           );
           const link = document.createElement("a");
           link.href = "mailto:" + TO;
@@ -1986,6 +2008,7 @@
           turnstileToken = "";
           if (window.turnstile) window.turnstile.reset();
         } finally {
+          clearTimeout(timeoutId);
           sendBtn.disabled = false;
           sendBtn.textContent = "Send Message";
         }
