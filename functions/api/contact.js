@@ -1,4 +1,3 @@
-
 export async function onRequestPost({ request, env }) {
   const headers = {
     "Content-Type": "application/json",
@@ -13,10 +12,13 @@ export async function onRequestPost({ request, env }) {
 
   try {
     const form = await request.formData();
+
     const name = String(form.get("name") || "").trim();
     const email = String(form.get("email") || "").trim();
     const message = String(form.get("message") || "").trim();
-    const token = String(form.get("cf-turnstile-response") || "").trim();
+    const token = String(
+      form.get("cf-turnstile-response") || ""
+    ).trim();
 
     if (!name || !email || !message || !token) {
       return reply("Complete all fields and CAPTCHA.", 400);
@@ -49,13 +51,19 @@ export async function onRequestPost({ request, env }) {
       }
     );
 
+    if (!verifyResponse.ok) {
+      console.error("Turnstile service returned HTTP", verifyResponse.status);
+      return reply("CAPTCHA verification is temporarily unavailable.", 502);
+    }
+
     const verification = await verifyResponse.json();
 
     if (
       !verification.success ||
-      !["ashishpandey.com.np", "www.ashishpandey.com.np"].includes(
-        verification.hostname
-      )
+      ![
+        "ashishpandey.com.np",
+        "www.ashishpandey.com.np",
+      ].includes(verification.hostname)
     ) {
       return reply("CAPTCHA verification failed. Try again.", 403);
     }
@@ -77,12 +85,30 @@ export async function onRequestPost({ request, env }) {
       }
     );
 
-    if (!emailResponse.ok) {
-      return reply("Could not send your message. Try again later.", 502);
+    const result = await emailResponse.json().catch(() => null);
+
+    if (!emailResponse.ok || result?.success !== "true") {
+      console.error("FormSubmit rejected the request:", {
+        httpStatus: emailResponse.status,
+        providerMessage:
+          typeof result?.message === "string"
+            ? result.message
+            : "No provider message returned",
+      });
+
+      return reply(
+        "Could not send your message. Please try again later.",
+        502
+      );
     }
 
     return reply("Your message was sent successfully!", 200);
-  } catch {
+  } catch (error) {
+    console.error(
+      "Contact form request failed:",
+      error instanceof Error ? error.message : "Unknown error"
+    );
+
     return reply("Something went wrong. Try again later.", 500);
   }
 }
