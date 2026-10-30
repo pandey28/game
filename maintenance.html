@@ -1992,14 +1992,13 @@
           if (error && error.name === "AbortError") {
             failureText = "The request took too long.";
           }
-          showStatus(
-            "err",
-            failureText +
-              " Please email " +
-              TO +
-              " directly." +
-              (serverRef ? " (Ref: " + serverRef + ")" : ""),
-          );
+        showStatus(
+        "err",
+        "We couldn't send your message right now. Sorry for the inconvenience! " +
+        "Your message has not been submitted. Please email me directly at " +
+        TO +
+        ", or try submitting the form again later. Thank you for your understanding!"
+        );
           const link = document.createElement("a");
           link.href = "mailto:" + TO;
           link.textContent = TO;
